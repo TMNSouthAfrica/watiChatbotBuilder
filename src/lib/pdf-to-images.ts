@@ -4,14 +4,19 @@
 // Runs client-side (not in the Vercel serverless function) so the API route
 // never needs native PDF-rendering binaries.
 
-const PDFJS_VERSION = "6.3.289";
-
 let workerConfigured = false;
 
-async function loadPdfjs() {
-  const pdfjs = await import("pdfjs-dist");
+// The "legacy" build runs in browsers that don't yet have the newest
+// JavaScript features the modern build relies on.
+export async function loadPdfjs() {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   if (!workerConfigured) {
-    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+    // Bundled with the app so it always matches the library version and
+    // doesn't depend on an outside CDN.
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
     workerConfigured = true;
   }
   return pdfjs;

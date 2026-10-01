@@ -1,11 +1,39 @@
 # WATI Chatbot Flow Builder
 
-Build WhatsApp chatbot flows visually and download them as a **WATI** flow
-JSON file, ready to import into WATI's Chatbot builder. No AI and no API key
-are involved: the editor converts the flow to WATI's format with fixed rules,
-so the same flow always produces the same file.
+Turn a Canva flow diagram (exported as PDF) into a WATI chatbot flow JSON
+file, ready to import into WATI's Chatbot builder. No AI and no API key are
+involved: the PDF's shapes, colours, text and lines are read directly and
+converted with fixed rules, so the same PDF always gives the same result.
 
-## How it works
+## From a Canva PDF
+
+1. In Canva, download the diagram as **PDF** (standard, not flattened).
+2. Click **Import Canva PDF**. Pages crossed out with a big red X are skipped;
+   if several pages are left you're asked which to build.
+3. The flow opens in the editor. Yellow notes on steps carry anything the
+   diagram says that WATI can't hold (team members, "attach this document",
+   sticky notes). The Checks panel lists what still needs a decision —
+   e.g. button text over WhatsApp's limits.
+4. Fix those, then **Download WATI JSON** and import it into WATI.
+
+The converter expects the diagram style the team uses:
+
+| In the diagram | Becomes |
+| --- | --- |
+| Teal or pink outlined box | Message |
+| …with white pills inside | Buttons (up to 3) or List (4+) |
+| …with a grey "Save Attribute" tag beside it | Saves the answer/choice to that variable (a box without pills becomes a Question) |
+| Orange diamond with two labelled exits (`variable = value`) | Condition |
+| Orange diamond with one exit | Ignored (just a branch label) |
+| Green block with nothing leading in | Start of the flow |
+| Green block at the end ("Hand over to …") | Assign Team (team members kept as a note) |
+| Grey line with arrowhead | Connection |
+| Red / purple / blue sticky, orange "Capture Tag" | Note on the nearest step |
+
+Every menu also gets WATI's usual "Please select one of the options below"
+reply for customers who type instead of tapping.
+
+## Building or editing flows by hand
 
 1. Add steps from the left-hand list: Message, Question, Buttons, List,
    Condition, Update Attribute, WhatsApp Flow, Assign Team / Agent, Set Topic,
@@ -62,6 +90,12 @@ duration is capped at 60s regardless of that setting.
 - `src/lib/wati/nodes.ts` — per-step defaults, outputs and text helpers.
 - `src/lib/wati/types.ts` — WATI flow types and WhatsApp limits.
 - `src/lib/wati-schema.ts` — reference notes on WATI's flow JSON format.
+- `src/lib/pdf-diagram/extract.ts` — reads shapes, text and images from a PDF
+  page (pdf.js, in the browser).
+- `src/lib/pdf-diagram/parse.ts` — the diagram rules above; colours live in
+  `COLORS` at the top of the file.
+- `src/lib/pdf-diagram/import.ts` — page selection and the automatic
+  "please select" replies.
 - `src/app/from-diagram/page.tsx`, `src/app/api/generate/route.ts` — the
   optional diagram-to-JSON generator (Claude API).
 
@@ -70,5 +104,8 @@ duration is capped at 60s regardless of that setting.
 - Real WATI Team IDs, Agent IDs and WhatsApp Flow IDs come from your WATI
   account. Enter them in the step, or leave them blank and fill them in
   WATI after importing.
+- The PDF converter relies on the diagram style above. A diagram drawn
+  differently (other colours, lines that don't touch the boxes) will need more
+  fixing in the editor, or a change to `COLORS`.
 - The format was worked out from a real WATI export; WATI hasn't published
   it. If WATI rejects a file, keep a copy of it so the editor can be fixed.

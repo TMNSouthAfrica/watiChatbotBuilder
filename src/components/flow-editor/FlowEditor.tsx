@@ -31,6 +31,7 @@ import {
   NODE_TYPE_LABELS,
   type WatiNodeType,
 } from "@/lib/wati/types";
+import { buildFlowFromPages, readDiagramPdf, type DiagramPage } from "@/lib/pdf-diagram/import";
 import { Inspector } from "./Inspector";
 import { TYPE_COLORS, WatiNodeCard } from "./WatiNodeCard";
 
@@ -42,6 +43,7 @@ interface SavedState {
   nodes: EditorNode[];
   edges: EditorEdge[];
   extra: Record<string, unknown>;
+  importNotes?: string[];
 }
 
 function loadSaved(): SavedState | null {
@@ -92,15 +94,34 @@ function Editor() {
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(initial?.nodes ?? []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>(initial?.edges ?? []);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [importNotes, setImportNotes] = useState<string[]>(initial?.importNotes ?? []);
+  const [pdfPages, setPdfPages] = useState<DiagramPage[] | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const pdfRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
+  // Bumped when a whole new flow is loaded, to zoom out to show all of it
+  // once React Flow has measured every step.
+  const [fitRequest, setFitRequest] = useState(0);
+  useEffect(() => {
+    if (fitRequest === 0) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const all = getNodes();
+      if (all.every((n) => n.measured?.width) || ++tries > 30) {
+        window.clearInterval(timer);
+        void fitView({ padding: 0.08, minZoom: 0.05 });
+      }
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [fitRequest, getNodes, fitView]);
 
   // Remember the flow in this browser so a refresh doesn't lose work.
   useEffect(() => {
-    const t = window.setTimeout(() => save({ name: flowName, nodes, edges, extra }), 400);
+    const t = window.setTimeout(() => save({ name: flowName, nodes, edges, extra, importNotes }), 400);
     return () => window.clearTimeout(t);
-  }, [flowName, nodes, edges, extra]);
+  }, [flowName, nodes, edges, extra, importNotes]);
 
   const flow: EditorFlow = useMemo(
     () => ({ name: flowName.trim() || "Untitled Flow", nodes, edges, extra }),
@@ -302,8 +323,9 @@ function Editor() {
         setNodes(imported.nodes);
         setEdges(imported.edges);
         setExtra(imported.extra);
+        setImportNotes([]);
         setNotice({ kind: "ok", text: `Imported “${imported.name}” — ${imported.nodes.length} steps.` });
-        window.setTimeout(() => fitView({ padding: 0.2 }), 50);
+        setFitRequest((k) => k + 1);
       } catch (err) {
         setNotice({
           kind: "error",
@@ -311,7 +333,49 @@ function Editor() {
         });
       }
     },
-    [nodes.length, setNodes, setEdges, fitView],
+    [nodes.length, setNodes, setEdges],
+  );
+
+  const applyPdfPages = useCallback(
+    (pages: DiagramPage[], fileName: string) => {
+      const name = flowName.trim() || fileName.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ");
+      const { flow: built, notes } = buildFlowFromPages(pages, name);
+      setFlowName(name);
+      setNodes(built.nodes);
+      setEdges(built.edges);
+      setExtra({});
+      setImportNotes(notes);
+      setPdfPages(null);
+      const pageList = pages.map((p) => p.pageNumber).join(", ");
+      setNotice({
+        kind: "ok",
+        text: `Built ${built.nodes.length} steps from page ${pageList}. Check the notes and warnings on the right, then download.`,
+      });
+      setFitRequest((k) => k + 1);
+    },
+    [flowName, setNodes, setEdges],
+  );
+
+  const pdfFileName = useRef("");
+  const handlePdf = useCallback(
+    async (file: File) => {
+      if (nodes.length > 0 && !window.confirm("Replace the current flow with the one from this PDF?")) return;
+      setPdfBusy(true);
+      setNotice(null);
+      try {
+        const pages = await readDiagramPdf(file);
+        pdfFileName.current = file.name;
+        const usable = pages.filter((p) => !p.crossedOut);
+        // One page that isn't crossed out: no need to ask.
+        if (usable.length === 1) applyPdfPages(usable, file.name);
+        else setPdfPages(pages);
+      } catch (err) {
+        setNotice({ kind: "error", text: `Couldn't read that PDF: ${(err as Error).message}` });
+      } finally {
+        setPdfBusy(false);
+      }
+    },
+    [nodes.length, applyPdfPages],
   );
 
   const handleNew = useCallback(() => {
@@ -320,6 +384,7 @@ function Editor() {
     setNodes([]);
     setEdges([]);
     setExtra({});
+    setImportNotes([]);
     setNotice(null);
   }, [nodes.length, setNodes, setEdges]);
 
@@ -343,6 +408,25 @@ function Editor() {
         />
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <ToolbarButton onClick={handleNew}>New</ToolbarButton>
+          <button
+            type="button"
+            onClick={() => pdfRef.current?.click()}
+            disabled={pdfBusy}
+            className="rounded-md border border-blue-600 bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {pdfBusy ? "Reading PDF…" : "Import Canva PDF"}
+          </button>
+          <input
+            ref={pdfRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handlePdf(file);
+              e.target.value = "";
+            }}
+          />
           <ToolbarButton onClick={() => importRef.current?.click()}>Open WATI JSON</ToolbarButton>
           <input
             ref={importRef}
@@ -416,6 +500,7 @@ function Editor() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             colorMode="system"
+            minZoom={0.05}
             fitView
             deleteKeyCode={["Delete", "Backspace"]}
             defaultEdgeOptions={{ type: "smoothstep" }}
@@ -427,8 +512,8 @@ function Editor() {
           {nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
               <div className="max-w-sm rounded-lg border border-dashed border-black/20 bg-white/80 p-5 text-center text-sm text-black/60 dark:border-white/25 dark:bg-black/60 dark:text-white/60">
-                Add your first step from the list, or open an existing WATI export to edit it. Your work is saved
-                in this browser automatically.
+                Click <strong>Import Canva PDF</strong> to build the flow from your diagram, add steps from the
+                list, or open an existing WATI export. Your work is saved in this browser automatically.
               </div>
             </div>
           )}
@@ -444,10 +529,39 @@ function Editor() {
               onDelete={() => deleteNode(selected.id)}
               onDuplicate={() => duplicateNode(selected.id)}
               onAddFallback={() => addFallback(selected.id)}
+              onClearNote={() =>
+                setNodes((current) =>
+                  current.map((n) => {
+                    if (n.id !== selected.id) return n;
+                    const data = { ...n.data };
+                    delete data.note;
+                    return { ...n, data };
+                  }),
+                )
+              }
             />
           ) : (
             <div className="flex flex-col gap-3">
               <h2 className="text-base font-semibold">Checks</h2>
+              {importNotes.length > 0 && (
+                <div className="flex flex-col gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/5 p-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold">From the PDF</span>
+                    <button
+                      type="button"
+                      className="text-[11px] opacity-60 hover:opacity-100"
+                      onClick={() => setImportNotes([])}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <ul className="flex list-disc flex-col gap-1 pl-4 text-xs">
+                    {importNotes.map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {nodes.length > 0 && issues.length === 0 && (
                 <p className="rounded-md bg-emerald-500/10 p-2.5 text-sm text-emerald-700 dark:text-emerald-300">
                   No problems found — ready to download.
@@ -483,6 +597,77 @@ function Editor() {
             </div>
           )}
         </aside>
+      </div>
+
+      {pdfPages && (
+        <PagePicker
+          pages={pdfPages}
+          onCancel={() => setPdfPages(null)}
+          onConfirm={(chosen) => applyPdfPages(chosen, pdfFileName.current)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PagePicker({
+  pages,
+  onCancel,
+  onConfirm,
+}: {
+  pages: DiagramPage[];
+  onCancel: () => void;
+  onConfirm: (pages: DiagramPage[]) => void;
+}) {
+  const [chosen, setChosen] = useState<Set<number>>(
+    () => new Set(pages.filter((p) => !p.crossedOut).map((p) => p.pageNumber)),
+  );
+  const toggle = (n: number) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto rounded-lg bg-white p-5 text-black shadow-xl dark:bg-neutral-900 dark:text-white">
+        <div>
+          <h2 className="text-lg font-semibold">Which pages should be built?</h2>
+          <p className="text-sm text-black/60 dark:text-white/60">
+            Crossed-out pages are skipped automatically. Each chosen page is added to the flow.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {pages.map((p) => (
+            <label
+              key={p.pageNumber}
+              className={`flex cursor-pointer flex-col gap-1.5 rounded-md border p-2 ${
+                chosen.has(p.pageNumber) ? "border-blue-500 ring-2 ring-blue-500/30" : "border-black/15 dark:border-white/20"
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.thumbnail} alt={`Page ${p.pageNumber}`} className="w-full rounded border border-black/10" />
+              <span className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={chosen.has(p.pageNumber)} onChange={() => toggle(p.pageNumber)} />
+                Page {p.pageNumber}
+                {p.crossedOut && <span className="text-xs text-red-600 dark:text-red-400">crossed out</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <ToolbarButton onClick={onCancel}>Cancel</ToolbarButton>
+          <button
+            type="button"
+            disabled={chosen.size === 0}
+            onClick={() => onConfirm(pages.filter((p) => chosen.has(p.pageNumber)))}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            Build flow
+          </button>
+        </div>
       </div>
     </div>
   );

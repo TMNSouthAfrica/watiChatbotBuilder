@@ -29,6 +29,7 @@ interface InspectorProps {
   onDelete: () => void;
   onDuplicate: () => void;
   onAddFallback: () => void;
+  onClearNote: () => void;
 }
 
 const inputClass =
@@ -149,7 +150,15 @@ function SmallButton({
   );
 }
 
-export function Inspector({ node, onChange, onMakeStart, onDelete, onDuplicate, onAddFallback }: InspectorProps) {
+export function Inspector({
+  node,
+  onChange,
+  onMakeStart,
+  onDelete,
+  onDuplicate,
+  onAddFallback,
+  onClearNote,
+}: InspectorProps) {
   const type = node.data.flowNodeType;
   const f = node.data.fields;
   const set = (patch: Fields) => onChange({ ...f, ...patch });
@@ -162,6 +171,16 @@ export function Inspector({ node, onChange, onMakeStart, onDelete, onDuplicate, 
           {NODE_TYPE_DESCRIPTIONS[type as WatiNodeType] ?? "Imported step type — its settings are kept as-is."}
         </p>
       </div>
+
+      {typeof node.data.note === "string" && node.data.note && (
+        <div className="flex flex-col gap-1.5 rounded-md bg-amber-100 p-2.5 text-xs text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
+          <span className="font-semibold">Note from the diagram</span>
+          <span className="whitespace-pre-line">{node.data.note}</span>
+          <div>
+            <SmallButton onClick={onClearNote}>Done — remove note</SmallButton>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {node.data.isStartNode ? (

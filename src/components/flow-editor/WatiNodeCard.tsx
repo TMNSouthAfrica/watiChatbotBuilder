@@ -52,6 +52,11 @@ export function WatiNodeCard({ id, data, selected }: NodeProps<EditorNode>) {
       <div className="line-clamp-3 min-h-8 whitespace-pre-line px-3 py-2 text-xs text-black/70 dark:text-white/70">
         {preview || <span className="italic opacity-60">Click to edit</span>}
       </div>
+      {typeof data.note === "string" && data.note && (
+        <div className="line-clamp-3 whitespace-pre-line border-t border-amber-500/30 bg-amber-100 px-3 py-1.5 text-[11px] text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
+          {data.note}
+        </div>
+      )}
 
       {outputs.length === 1 && outputs[0].id === null ? (
         <Handle type="source" position={Position.Right} className="!h-3 !w-3 !bg-neutral-500" />
