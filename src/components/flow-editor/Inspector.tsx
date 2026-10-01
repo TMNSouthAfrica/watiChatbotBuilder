@@ -12,6 +12,7 @@ import {
   MAX_LIST_ROWS,
   NODE_TYPE_DESCRIPTIONS,
   NODE_TYPE_LABELS,
+  OTHER_TYPE_LABELS,
   type AttributeVariable,
   type ButtonItem,
   type FlowCondition,
@@ -166,7 +167,9 @@ export function Inspector({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold">{NODE_TYPE_LABELS[type as WatiNodeType] ?? type}</h2>
+        <h2 className="text-base font-semibold">
+          {NODE_TYPE_LABELS[type as WatiNodeType] ?? OTHER_TYPE_LABELS[type] ?? type}
+        </h2>
         <p className="text-xs text-black/50 dark:text-white/50">
           {NODE_TYPE_DESCRIPTIONS[type as WatiNodeType] ?? "Imported step type — its settings are kept as-is."}
         </p>
@@ -237,6 +240,8 @@ interface FieldsProps {
   set: (patch: Fields) => void;
 }
 
+const REPLY_TYPES = ["Text", "Image", "Video", "Document"];
+
 function MessageFields({ f, set }: FieldsProps) {
   const replies = (f.flowReplies as FlowReply[] | undefined) ?? [];
   const update = (i: number, patch: Partial<FlowReply>) =>
@@ -250,13 +255,20 @@ function MessageFields({ f, set }: FieldsProps) {
             <select
               className="rounded border border-black/15 bg-transparent px-1.5 py-0.5 text-xs dark:border-white/20"
               value={r.flowReplyType}
-              onChange={(e) => update(i, { flowReplyType: e.target.value })}
+              onChange={(e) => {
+                const next = e.target.value;
+                // Text lives in "data"; media keeps its caption in "caption".
+                if (next === "Text" && r.flowReplyType !== "Text") update(i, { flowReplyType: next, data: r.caption, caption: "" });
+                else if (next !== "Text" && r.flowReplyType === "Text") update(i, { flowReplyType: next, caption: r.data, data: "" });
+                else update(i, { flowReplyType: next });
+              }}
             >
-              <option value="Text">Text</option>
-              <option value="Image">Image</option>
-              {!["Text", "Image"].includes(r.flowReplyType) && (
-                <option value={r.flowReplyType}>{r.flowReplyType}</option>
-              )}
+              {REPLY_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+              {!REPLY_TYPES.includes(r.flowReplyType) && <option value={r.flowReplyType}>{r.flowReplyType}</option>}
             </select>
             {replies.length > 1 && (
               <SmallButton danger onClick={() => set({ flowReplies: replies.filter((_, j) => j !== i) })}>
@@ -264,14 +276,26 @@ function MessageFields({ f, set }: FieldsProps) {
               </SmallButton>
             )}
           </div>
-          {r.flowReplyType !== "Text" && (
-            <Field label="Media URL" hint="A public link to the image.">
-              <TextInput value={r.data} onChange={(v) => update(i, { data: v })} placeholder="https://…" />
+          {r.flowReplyType === "Text" ? (
+            <Field label="Message text">
+              <RichText html={r.data} onChange={(data) => update(i, { data })} />
             </Field>
+          ) : (
+            <>
+              <p className="text-[11px] text-black/50 dark:text-white/50">
+                Upload the {r.flowReplyType.toLowerCase()} in WATI after importing.
+              </p>
+              {r.flowReplyType === "Document" ? (
+                <Field label="File name">
+                  <TextInput value={r.caption} onChange={(caption) => update(i, { caption })} />
+                </Field>
+              ) : (
+                <Field label="Caption (optional)">
+                  <RichText html={r.caption} rows={2} onChange={(caption) => update(i, { caption })} />
+                </Field>
+              )}
+            </>
           )}
-          <Field label={r.flowReplyType === "Text" ? "Message text" : "Caption"}>
-            <RichText html={r.caption} onChange={(caption) => update(i, { caption })} />
-          </Field>
         </div>
       ))}
       <SmallButton

@@ -22,8 +22,8 @@ export function randomId(length: number): string {
 const TYPE_SLUGS: Record<WatiNodeType, string> = {
   Message: "message",
   Question: "question",
-  InteractiveButtons: "interactiveButtons",
-  InteractiveList: "interactiveList",
+  InteractiveButtons: "buttons",
+  InteractiveList: "list",
   Condition: "condition",
   UpdateAttribute: "updateAttribute",
   InteractiveWhatsAppFlow: "interactiveWhatsAppFlow",
@@ -33,16 +33,15 @@ const TYPE_SLUGS: Record<WatiNodeType, string> = {
   UpdateChatStatus: "updateChatStatus",
 };
 
-function flowPrefix(flowName: string): string {
-  const slug = flowName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 12);
-  return slug || "flow";
-}
-
-/** Node ids follow WATI's "<prefix>_<nodeType>-<alnum>" convention. */
-export function newNodeId(type: WatiNodeType, flowName: string, taken: Set<string>): string {
+/**
+ * Node ids follow WATI's own "main_<type>-<5 letters>" convention, e.g.
+ * "main_buttons-LSJdF". (The flow name argument is kept for callers but WATI
+ * always uses "main".)
+ */
+export function newNodeId(type: WatiNodeType, _flowName: string, taken: Set<string>): string {
   let id: string;
   do {
-    id = `${flowPrefix(flowName)}_${TYPE_SLUGS[type]}-${randomId(5)}`;
+    id = `main_${TYPE_SLUGS[type]}-${randomId(5)}`;
   } while (taken.has(id));
   return id;
 }
@@ -208,7 +207,8 @@ export function outputsFor(
 export function htmlToText(html: string): string {
   if (!html) return "";
   return html
-    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "<p></p>")
+    .replace(/<br\s*\/?>\s*\n?/gi, "\n")
     .replace(/<\/p>\s*<p[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
@@ -226,12 +226,13 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/** Same shape WATI writes: one <p> per line, "<p><br></p>" for a blank line. */
 export function textToHtml(text: string): string {
   if (!text) return "";
   return text
     .split("\n")
-    .map((line) => `<p>${escapeHtml(line)}</p>`)
-    .join("");
+    .map((line) => (line ? `<p>${escapeHtml(line)}</p>` : "<p><br></p>"))
+    .join("\n");
 }
 
 /** A one-line summary of a node's content, for the canvas card. */
@@ -241,7 +242,9 @@ export function nodePreview(type: string, fields: Record<string, unknown>): stri
     case "Message":
       return replies
         .map((r) =>
-          r.flowReplyType === "Text" ? htmlToText(r.caption || r.data) : `[${r.flowReplyType}]`,
+          r.flowReplyType === "Text"
+            ? htmlToText(r.data || r.caption)
+            : `[${r.flowReplyType}]${r.caption ? ` ${htmlToText(r.caption)}` : ""}`,
         )
         .join(" · ");
     case "Question":
@@ -273,6 +276,10 @@ export function nodePreview(type: string, fields: Record<string, unknown>): stri
       return String(fields.topicName ?? "");
     case "UpdateChatStatus":
       return String(fields.status ?? "");
+    case "Webhook":
+      return `${String(fields.methodType ?? "").toUpperCase()} ${String(fields.url ?? "")}`.trim();
+    case "TimeDelay":
+      return `Wait ${String(fields.delaySeconds ?? 0)} s`;
     default:
       return "";
   }

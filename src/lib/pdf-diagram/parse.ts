@@ -15,7 +15,12 @@
 import type { EditorEdge, EditorFlow, EditorNode } from "@/lib/wati/convert";
 import { edgeId } from "@/lib/wati/convert";
 import { defaultFields, newItemId, newNodeId, textToHtml } from "@/lib/wati/nodes";
-import { MAX_BUTTONS, type WatiNodeType } from "@/lib/wati/types";
+import {
+  MAX_BUTTONS,
+  MAX_LIST_ROW_DESCRIPTION,
+  MAX_LIST_ROW_TITLE,
+  type WatiNodeType,
+} from "@/lib/wati/types";
 import type { PdfPageContent, PdfShape, PdfText, Point, Rect } from "./extract";
 
 // ---- Style key ------------------------------------------------------------
@@ -359,6 +364,54 @@ function connect(elements: Element[], lines: Line[], arrowheads: Rect[]): Diagra
   return edges;
 }
 
+/**
+ * WhatsApp list options are limited to 24 characters, with a 72-character
+ * description line underneath. Long labels from the diagram are split so the
+ * file imports: "Account Query (Statement / Invoices)" becomes the title
+ * "Account Query" with "Statement / Invoices" as its description.
+ */
+function fitListRow(label: string): { title: string; description: string } {
+  if (label.length <= MAX_LIST_ROW_TITLE) return { title: label, description: "" };
+  const paren = label.match(/^(.+?)\s*\((.+)\)\s*$/);
+  if (paren && paren[1].length <= MAX_LIST_ROW_TITLE) {
+    return { title: paren[1].trim(), description: paren[2].trim().slice(0, MAX_LIST_ROW_DESCRIPTION) };
+  }
+  let title = "";
+  for (const word of label.split(" ")) {
+    if ((title ? `${title} ${word}` : word).length > MAX_LIST_ROW_TITLE) break;
+    title = title ? `${title} ${word}` : word;
+  }
+  if (!title) title = label.slice(0, MAX_LIST_ROW_TITLE);
+  const rest = label.slice(title.length).trim();
+  return { title, description: rest.slice(0, MAX_LIST_ROW_DESCRIPTION) };
+}
+
+/** Fits every option of one menu, keeping titles distinct from each other. */
+function fitListRows(labels: string[]): { title: string; description: string }[] {
+  const rows = labels.map(fitListRow);
+  const groups = new Map<string, number[]>();
+  rows.forEach((r, i) => groups.set(r.title.toLowerCase(), [...(groups.get(r.title.toLowerCase()) ?? []), i]));
+  for (const indexes of groups.values()) {
+    if (indexes.length < 2) continue;
+    // Options sharing a start ("Eco-Choice Certificate Proclean / Probio …"):
+    // title them by what differs and keep the full name as the description.
+    const words = indexes.map((i) => labels[i].split(" "));
+    let common = 0;
+    while (words.every((w) => w[common] !== undefined && w[common] === words[0][common]) && words.every((w) => w.length > common + 1)) {
+      common++;
+    }
+    for (const [k, i] of indexes.entries()) {
+      const rest = words[k].slice(common).join(" ");
+      if (!rest) continue;
+      rows[i] = {
+        title: fitListRow(rest).title,
+        description: labels[i].slice(0, MAX_LIST_ROW_DESCRIPTION),
+      };
+    }
+  }
+  return rows;
+}
+
 const EMPTY_VALUE = /\b(nothing|blank|empty|none|null|not set|no value)\b/i;
 
 function parseLabel(label: string): { variable: string; value: string } | null {
@@ -424,6 +477,7 @@ export function parseDiagramPage(page: PdfPageContent, flowName: string): Parsed
   const tagFor = (box: Element) => tags.find((t) => rectGap(t.bbox, box.bbox) < 6);
   const buttonsOf = new Map<Element, { pill: Element; id: string }[]>();
 
+  const MENU_FALLBACK_TEXT = "Please choose an option below:";
   for (const box of boxes) {
     const pills = elements
       .filter((e) => e.kind === "pill" && e.parent === box)
@@ -433,13 +487,16 @@ export function parseDiagramPage(page: PdfPageContent, flowName: string): Parsed
     const variable = tag ? variableFromTag(textOf(tag.texts)) : "";
     const noteParts: string[] = [];
     if (box.hasDocumentIcon) noteParts.push("Attach the document shown in the diagram.");
+    // WhatsApp menus must have message text; the diagram sometimes leaves it out.
+    const menuBody = body || MENU_FALLBACK_TEXT;
+    if (pills.length > 0 && !body) noteParts.push(`No text in the diagram — “${MENU_FALLBACK_TEXT}” was added.`);
 
     if (pills.length > 0 && pills.length <= MAX_BUTTONS) {
       const items = pills.map((p) => ({ pill: p, id: newItemId() }));
       buttonsOf.set(box, items);
       make(box, "InteractiveButtons", {
         ...defaultFields("InteractiveButtons"),
-        interactiveButtonsBody: textToHtml(body),
+        interactiveButtonsBody: textToHtml(menuBody),
         interactiveButtonsItems: items.map(({ pill, id }) => ({
           id,
           buttonText: textOf(pill.texts).replace(/\n+/g, " "),
@@ -452,15 +509,14 @@ export function parseDiagramPage(page: PdfPageContent, flowName: string): Parsed
       buttonsOf.set(box, items);
       make(box, "InteractiveList", {
         ...defaultFields("InteractiveList"),
-        interactiveListBody: textToHtml(body),
+        interactiveListBody: textToHtml(menuBody),
         interactiveListSections: [
           {
             id: newItemId(),
             title: "",
-            rows: items.map(({ pill, id }) => ({
-              id,
-              title: textOf(pill.texts).replace(/\n+/g, " "),
-              description: "",
+            rows: fitListRows(items.map(({ pill }) => textOf(pill.texts).replace(/\n+/g, " "))).map((row, i) => ({
+              id: items[i].id,
+              ...row,
               nodeResultId: "",
             })),
           },
@@ -472,9 +528,15 @@ export function parseDiagramPage(page: PdfPageContent, flowName: string): Parsed
       fields.flowReplies = [{ flowReplyType: "Text", data: textToHtml(body), caption: "", mimeType: "" }];
       fields.userInputVariable = variable;
       make(box, "Question", fields, noteParts.join(" ") || undefined);
+    } else if (box.hasDocumentIcon && !/^https?:\/\//i.test(body.trim())) {
+      // A document box: WATI sends the file itself, captioned with its name.
+      // The file has to be uploaded in WATI after importing.
+      make(box, "Message", {
+        flowReplies: [{ flowReplyType: "Document", data: "", caption: body.trim(), mimeType: "" }],
+      }, body.trim() ? "Upload this document in WATI after importing." : "Upload the document shown in the diagram (no file name was given).");
     } else {
       make(box, "Message", {
-        flowReplies: [{ flowReplyType: "Text", data: "", caption: textToHtml(body), mimeType: "" }],
+        flowReplies: [{ flowReplyType: "Text", data: textToHtml(body), caption: "", mimeType: "" }],
       }, noteParts.join(" ") || undefined);
     }
   }

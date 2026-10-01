@@ -67,10 +67,14 @@ export function toWatiFlow(flow: EditorFlow): WatiFlow {
       }));
       fields.interactiveListDefaultNodeResultId = targetOf(node.id, defaultHandleId(node.id));
     } else if (type === "Condition") {
+      const previous = (fields.conditionResult as Record<string, unknown> | undefined) ?? {};
+      // WATI writes null (not "") for an unconnected branch in some exports; keep it.
+      const keep = (handle: string, key: string) =>
+        targetOf(node.id, handle) || (previous[key] === null ? null : "");
       fields.conditionResult = {
-        ...((fields.conditionResult as object | undefined) ?? {}),
-        yResultNodeId: targetOf(node.id, "true"),
-        nResultNodeId: targetOf(node.id, "false"),
+        ...previous,
+        yResultNodeId: keep("true", "yResultNodeId"),
+        nResultNodeId: keep("false", "nResultNodeId"),
       };
     }
 
@@ -79,8 +83,8 @@ export function toWatiFlow(flow: EditorFlow): WatiFlow {
       id: node.id,
       flowNodeType: type,
       flowNodePosition: {
-        posX: String(Math.round(node.position.x)),
-        posY: String(Math.round(node.position.y)),
+        posX: String(node.position.x),
+        posY: String(node.position.y),
       },
       isStartNode: node.data.isStartNode,
     };
@@ -92,22 +96,26 @@ export function toWatiFlow(flow: EditorFlow): WatiFlow {
     targetNodeId: e.target,
   }));
 
-  return {
-    id: null,
-    tenantId: null,
-    created: null,
-    lastUpdated: null,
-    isDeleted: false,
-    transform: null,
-    isPro: false,
-    flowVersion: null,
-    fallback: null,
-    channelTypes: null,
-    ...flow.extra,
+  // Same keys, in the same order, as a WATI export. flowVersion / fallback
+  // only appear in some exports, so they're only written when imported.
+  const extra = flow.extra;
+  const out: WatiFlow = {
+    id: (extra.id as string | null | undefined) ?? null,
+    tenantId: (extra.tenantId as string | null | undefined) ?? null,
     name: flow.name,
+    created: (extra.created as string | null | undefined) ?? null,
     flowNodes,
     flowEdges,
+    lastUpdated: (extra.lastUpdated as string | null | undefined) ?? null,
+    isDeleted: (extra.isDeleted as boolean | undefined) ?? false,
+    transform: extra.transform ?? { posX: "0", posY: "0", zoom: "0.5" },
+    isPro: (extra.isPro as boolean | undefined) ?? true,
   };
+  if ("flowVersion" in extra) out.flowVersion = extra.flowVersion;
+  if ("fallback" in extra) out.fallback = extra.fallback;
+  out.channelTypes = extra.channelTypes ?? ["WA"];
+  for (const [k, v] of Object.entries(extra)) if (!(k in out)) out[k] = v;
+  return out;
 }
 
 // ---- Import ---------------------------------------------------------------
@@ -248,6 +256,9 @@ export function validateFlow(flow: EditorFlow): Issue[] {
       if (items.length > MAX_BUTTONS) {
         issues.push({ level: "error", nodeId: node.id, message: `${name} has ${items.length} buttons — WhatsApp allows at most ${MAX_BUTTONS}. Use a List instead.` });
       }
+      if (new Set(items.map((b) => b.buttonText.trim().toLowerCase())).size < items.length) {
+        issues.push({ level: "error", nodeId: node.id, message: `${name}: two buttons have the same text — give each button different text.` });
+      }
       for (const b of items) {
         if (!b.buttonText.trim()) {
           issues.push({ level: "error", nodeId: node.id, message: `${name} has a button with no text.` });
@@ -273,7 +284,13 @@ export function validateFlow(flow: EditorFlow): Issue[] {
       if (!buttonText.trim() || buttonText.length > MAX_LIST_BUTTON_TEXT) {
         issues.push({ level: "error", nodeId: node.id, message: `${name}: the menu button text must be 1–${MAX_LIST_BUTTON_TEXT} characters.` });
       }
+      const seenTitles = new Set<string>();
       for (const r of rows) {
+        const key = r.title.trim().toLowerCase();
+        if (key && seenTitles.has(key)) {
+          issues.push({ level: "error", nodeId: node.id, message: `${name}: two options are both called “${r.title}” — give each option a different title.` });
+        }
+        seenTitles.add(key);
         if (!r.title.trim()) {
           issues.push({ level: "error", nodeId: node.id, message: `${name} has an option with no title.` });
         } else if (r.title.length > MAX_LIST_ROW_TITLE) {

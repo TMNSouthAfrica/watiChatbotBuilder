@@ -49,7 +49,19 @@ interface SavedState {
 function loadSaved(): SavedState | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as SavedState) : null;
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as SavedState;
+    // Earlier versions kept text messages in "caption"; WATI expects "data".
+    for (const n of saved.nodes) {
+      const replies = n.data.fields.flowReplies as { flowReplyType: string; data: string; caption: string }[] | undefined;
+      for (const r of replies ?? []) {
+        if (r.flowReplyType === "Text" && !r.data && r.caption) {
+          r.data = r.caption;
+          r.caption = "";
+        }
+      }
+    }
+    return saved;
   } catch {
     return null;
   }
@@ -279,8 +291,8 @@ function Editor() {
         flowReplies: [
           {
             flowReplyType: "Text",
-            data: "",
-            caption: textToHtml("Please select one of the options below to proceed."),
+            data: textToHtml("Please select one of the options below to proceed."),
+            caption: "",
             mimeType: "",
           },
         ],

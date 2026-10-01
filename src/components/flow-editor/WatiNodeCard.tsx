@@ -4,7 +4,7 @@ import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflo
 import { useEffect } from "react";
 import type { EditorNode } from "@/lib/wati/convert";
 import { nodePreview, outputsFor } from "@/lib/wati/nodes";
-import { NODE_TYPE_LABELS, TERMINAL_TYPES, type WatiNodeType } from "@/lib/wati/types";
+import { NODE_TYPE_LABELS, OTHER_TYPE_LABELS, TERMINAL_TYPES, type WatiNodeType } from "@/lib/wati/types";
 
 export const TYPE_COLORS: Record<string, string> = {
   Message: "bg-emerald-600",
@@ -18,6 +18,10 @@ export const TYPE_COLORS: Record<string, string> = {
   AssignAgent: "bg-rose-600",
   UpdateChatTopicName: "bg-slate-600",
   UpdateChatStatus: "bg-rose-700",
+  Webhook: "bg-indigo-600",
+  TimeDelay: "bg-slate-500",
+  InvokeFlow: "bg-cyan-700",
+  MessageTemplate: "bg-emerald-700",
 };
 
 export function WatiNodeCard({ id, data, selected }: NodeProps<EditorNode>) {
@@ -44,7 +48,7 @@ export function WatiNodeCard({ id, data, selected }: NodeProps<EditorNode>) {
           TYPE_COLORS[type] ?? "bg-neutral-600"
         }`}
       >
-        <span>{NODE_TYPE_LABELS[type as WatiNodeType] ?? type}</span>
+        <span>{NODE_TYPE_LABELS[type as WatiNodeType] ?? OTHER_TYPE_LABELS[type] ?? type}</span>
         {data.isStartNode && (
           <span className="rounded bg-white/25 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">Start</span>
         )}

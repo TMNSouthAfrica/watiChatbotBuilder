@@ -1,6 +1,5 @@
 // Reference schema for WATI's native Chatbot Flow-Builder export/import format.
-// Reverse-engineered from a real exported flow (WhatsApp interactive flow for a
-// pharmacy client). This is fed to Claude as grounding so generated flows are
+// Checked against several real exported flows. This is fed to Claude as grounding so generated flows are
 // actually importable into WATI, not a guessed/invented shape.
 
 export const WATI_SCHEMA_GUIDE = `
@@ -10,22 +9,21 @@ A WATI flow export is a single JSON object:
 
 {
   "id": null,
-  "tenantId": "<string, leave as null or omit for a new import>",
+  "tenantId": null,
   "name": "<flow name>",
   "created": null,
   "flowNodes": [ ...FlowNode ],
   "flowEdges": [ ...FlowEdge ],
   "lastUpdated": null,
   "isDeleted": false,
-  "transform": null,
-  "isPro": false,
-  "flowVersion": null,
-  "fallback": null,
-  "channelTypes": null
+  "transform": {"posX": "0", "posY": "0", "zoom": "0.5"},
+  "isPro": true,
+  "channelTypes": ["WA"]
 }
 
-Every node has: "id" (string, unique, convention "<flowname_prefix>_<nodeType>-<7 char alnum>"
-e.g. "main_message-WjvTc"), "flowNodeType", "flowNodePosition": {"posX":"<num string>","posY":"<num string>"},
+Every node has: "id" (string, unique, always "main_<type>-<5 letters>", where <type> is one of
+message, question, buttons, list, condition, updateAttribute, interactiveWhatsAppFlow, assignTeam,
+assignAgent, updateChatTopicName, updateChatStatus — e.g. "main_message-WjvTc", "main_buttons-LSJdF"), "flowNodeType", "flowNodePosition": {"posX":"<num string>","posY":"<num string>"},
 and "isStartNode" (true on exactly ONE node — the entry point).
 
 ## Node types
@@ -33,7 +31,11 @@ and "isStartNode" (true on exactly ONE node — the entry point).
 ### Message
 Sends a message with no reply expected. Moves to exactly one next node via a flowEdge.
 {
-  "flowReplies": [{"flowReplyType": "Text" | "Image", "data": "<media url or empty>", "caption": "<p>HTML-ish rich text</p>", "mimeType": ""}],
+  "flowReplies": [{"flowReplyType": "Text", "data": "<p>message text</p>", "caption": "", "mimeType": ""}],
+For a Text reply the text goes in "data" and "caption" is "". For "Image" / "Video" / "Document"
+replies "data" is "" (the file is uploaded in WATI) and "caption" holds the caption — for a
+Document, the file name (e.g. "Price-List-2025.pdf"). Multi-line text is one <p> per line joined
+with "\n", with "<p><br></p>" for a blank line.
   "id": "...", "flowNodeType": "Message", "flowNodePosition": {...}, "isStartNode": false
 }
 

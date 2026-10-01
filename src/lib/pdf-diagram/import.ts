@@ -99,8 +99,8 @@ function addNoMatchReplies(flow: EditorFlow) {
           flowReplies: [
             {
               flowReplyType: "Text",
-              data: "",
-              caption: textToHtml("Please select one of the options below to proceed."),
+              data: textToHtml("Please select one of the options below to proceed."),
+              caption: "",
               mimeType: "",
             },
           ],

@@ -47,9 +47,9 @@ export interface WatiFlow {
   isDeleted: boolean;
   transform: unknown;
   isPro: boolean;
-  flowVersion: unknown;
-  fallback: unknown;
-  channelTypes: unknown;
+  flowVersion?: unknown;
+  fallback?: unknown;
+  channelTypes?: unknown;
   [field: string]: unknown;
 }
 
@@ -130,6 +130,14 @@ export const NODE_TYPE_LABELS: Record<WatiNodeType, string> = {
   AssignAgent: "Assign Agent",
   UpdateChatTopicName: "Set Topic",
   UpdateChatStatus: "Set Chat Status",
+};
+
+/** Step types WATI supports that the editor opens and keeps, but can't add. */
+export const OTHER_TYPE_LABELS: Record<string, string> = {
+  Webhook: "Webhook",
+  TimeDelay: "Time Delay",
+  InvokeFlow: "Go to Flow",
+  MessageTemplate: "Template Message",
 };
 
 export const NODE_TYPE_DESCRIPTIONS: Record<WatiNodeType, string> = {
